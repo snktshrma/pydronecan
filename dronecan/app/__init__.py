@@ -11,6 +11,7 @@ from __future__ import division, absolute_import, print_function, unicode_litera
 
 from . import dynamic_node_id
 from . import file_server
+from . import file_client
 from . import log_message_monitor
 from . import message_collector
 from . import node_monitor
