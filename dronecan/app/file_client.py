@@ -35,23 +35,23 @@ class FileClient(object):
     def __init__(self, node, lookup_paths=None, path_map=None):
         if node.is_anonymous:
             raise dronecan.UAVCANException('File client cannot be launched on an anonymous node')
-
+        
+        self._total_transaction = 0
+        self._is_incomplete = False
         self.lookup_paths = lookup_paths or []
         self.path_map = path_map
 
         self._path_hit_counters = defaultdict(int)
-        self._handles = []
 
-        def add_handler(datatype, callback):
-            self._handles.append(node.add_handler(datatype, callback))
+        def request(req, node_id, callback):
+            node.request(req, node_id, callback)
 
-        add_handler(uavcan.protocol.file.GetInfo, self._get_info)
-        add_handler(uavcan.protocol.file.Read, self._read)
+        # add_handler(uavcan.protocol.file.GetInfo, self._write)
+        # add_handler(uavcan.protocol.file.Read, self._read)
         # TODO: support all file services
 
     def close(self):
-        for x in self._handles:
-            x.remove()
+        return
 
     @property
     def path_hit_counters(self):
@@ -69,7 +69,7 @@ class FileClient(object):
         self._path_hit_counters[out] += 1
         return out
 
-    def _get_info(self, e):
+    def _write(self, e):
         logger.debug("[#{0:03d}:uavcan.protocol.file.GetInfo] {1!r}"
                      .format(e.transfer.source_node_id, e.request.path.path.decode()))
         try:
@@ -88,18 +88,24 @@ class FileClient(object):
         return resp
 
     def _read(self, e):
+        self._is_incomplete = len(e.response.data.data) < 256
+        if self._is_incomplete:
+            self._total_transaction += len(e.response.data.data)
+    
+    def _read_call(self, path, node_id):
         logger.debug("[#{0:03d}:uavcan.protocol.file.Read] {1!r} @ offset {2:d}"
                      .format(e.transfer.source_node_id, e.request.path.path.decode(), e.request.offset))
         try:
-            with open(self._resolve_path(e.request.path), "rb") as f:
-                f.seek(e.request.offset)
-                resp = uavcan.protocol.file.Read.Response()
-                read_size = dronecan.get_dronecan_data_type(dronecan.get_fields(resp)['data']).max_size
-                resp.data = bytearray(f.read(read_size))
-                resp.error.value = resp.error.OK
+            req = uavcan.protocol.file.Read.Request()
+            if not self._is_incomplete:
+                req.offset = self._total_transaction
+                req.path = path
+                self.request(req, node_id, self._read)
+
+                return True
         except Exception:
             logger.exception("[#{0:03d}:uavcan.protocol.file.Read] error")
-            resp = uavcan.protocol.file.Read.Response()
-            resp.error.value = resp.error.UNKNOWN_ERROR
+            # resp = uavcan.protocol.file.Read.Response()
+            # resp.error.value = resp.error.UNKNOWN_ERROR
 
-        return resp
+        return False
